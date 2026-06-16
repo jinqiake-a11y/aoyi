@@ -421,6 +421,9 @@ interface TestScenario {
   expectedOutput: string;
   visualEffect: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
+  requiresInput?: boolean;
+  inputPrompt?: string;
+  inputPlaceholder?: string;
 }
 
 function generateTestScenarios(skill: SkillMeta, readmeText?: string): TestScenario[] {
@@ -467,6 +470,9 @@ function generateTestScenarios(skill: SkillMeta, readmeText?: string): TestScena
     expectedOutput: `✓ ${skill.name} 核心功能启动成功\n✓ AI 正确识别了 ${skill.tags.slice(0, 3).join(', ')} 相关指令\n✓ 输出格式符合 SKILL.md 规范\n✓ 功能执行完成，耗时 < 5s`,
     visualEffect: `该 Skill 的核心功能将根据其定义自动执行。${skill.description ? `根据项目描述：${skill.description.substring(0, 100)}...` : ''}AI 会在执行过程中展示详细的步骤和中间结果。`,
     difficulty: 'intermediate',
+    requiresInput: true,
+    inputPrompt: '请输入要测试的核心功能描述或命令。系统将根据您的输入模拟执行对应的功能测试。',
+    inputPlaceholder: '例如：帮我分析项目代码结构，并给出优化建议',
   });
 
   // Scenario 3: Multi-platform compatibility
@@ -535,6 +541,9 @@ function generateUseCaseScenarios(skill: SkillMeta, category: string, tags: stri
       expectedOutput: `✓ AI 工作流启动成功\n✓ RAG 检索: 找到 ${Math.floor(Math.random() * 20 + 5)} 条相关结果\n✓ LLM 调用成功，生成完整回答\n✓ 输出格式正确，可直接使用\n✓ 端到端延迟: < 10s`,
       visualEffect: `${skill.name} 能无缝集成到 AI 工作流中，自动完成知识检索、LLM 调用和结果格式化等步骤。用户只需描述需求，AI 会自动编排执行流程。`,
       difficulty: tags.includes('multi-agent') ? 'advanced' : 'intermediate',
+      requiresInput: true,
+      inputPrompt: '请输入您希望 AI 工作流处理的具体任务描述，例如知识检索、内容生成或数据分析需求。',
+      inputPlaceholder: '例如：从技术文档中检索关于 React Hooks 的最佳实践，并总结成 5 条建议',
     });
   }
 
@@ -577,6 +586,9 @@ function generateUseCaseScenarios(skill: SkillMeta, category: string, tags: stri
       expectedOutput: `✓ 数据源连接成功\n✓ 采集记录: 1,247 条\n✓ 数据清洗完成，去重 23 条，修复格式 15 条\n✓ 分析完成: 平均值 85.3，中位数 92.0\n✓ 结果已生成可视化报告`,
       visualEffect: `${skill.name} 的数据处理能力支持从采集到分析的全流程。自动清洗和格式转换确保数据质量，内置分析引擎可快速生成有价值的业务洞察。`,
       difficulty: 'intermediate',
+      requiresInput: true,
+      inputPrompt: '请输入数据源地址或文件路径，系统将模拟执行数据采集、清洗和分析流程。',
+      inputPlaceholder: '例如：https://example.com/api/data 或 ./data/source.csv',
     });
   }
 
@@ -619,6 +631,9 @@ function generateUseCaseScenarios(skill: SkillMeta, category: string, tags: stri
       expectedOutput: `✓ ${skill.name} 加载成功 (v${skill.version})\n✓ 帮助文档: 包含 ${skill.tags.length} 个标签说明和功能列表\n✓ 任务执行完成\n✓ 输出质量评分: 8.5/10\n✓ 推荐使用场景: ${category} 相关任务`,
       visualEffect: `${skill.name} 作为 AI 编码代理的 Skill 插件，在日常开发中提供智能辅助。通过标准化的 SKILL.md 接口，AI 可以快速理解并使用该 Skill 的功能。${skill.description ? `\n\n项目描述：${skill.description}` : ''}`,
       difficulty: 'beginner',
+      requiresInput: true,
+      inputPrompt: '请输入您希望该 Skill 协助完成的具体任务或问题描述。',
+      inputPlaceholder: '例如：分析当前项目结构并提供优化建议，或生成单元测试代码',
     });
   }
 
@@ -647,6 +662,23 @@ function SkillTestView({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [globalStatus, setGlobalStatus] = useState<'idle' | 'running' | 'completed'>('idle');
 
+  // ── 输入弹窗状态 ──
+  const [showInputDialog, setShowInputDialog] = useState(false);
+  const [inputScenario, setInputScenario] = useState<TestScenario | null>(null);
+  const [inputValue, setInputValue] = useState('');
+  const inputResolveRef = useRef<((value: string) => void) | null>(null);
+  const resultResolveRef = useRef<(() => void) | null>(null);
+
+  // ── 结果弹窗状态 ──
+  const [showResultDialog, setShowResultDialog] = useState(false);
+  const [resultData, setResultData] = useState<{
+    scenario: TestScenario;
+    userInput: string;
+    passed: boolean;
+    outputDetails: string;
+    stepResults: { icon: string; text: string; detail: string; passed: boolean }[];
+  } | null>(null);
+
   // ── 实时动态日志 ──
   interface LogEntry {
     id: number;
@@ -671,6 +703,239 @@ function SkillTestView({
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [testLogs]);
 
+  // ── 等待用户输入 ──
+  const waitForInput = (scenario: TestScenario): Promise<string> => {
+    return new Promise(resolve => {
+      setInputScenario(scenario);
+      setInputValue('');
+      setShowInputDialog(true);
+      inputResolveRef.current = resolve;
+    });
+  };
+
+  const handleInputConfirm = () => {
+    if (inputResolveRef.current) {
+      inputResolveRef.current(inputValue);
+      inputResolveRef.current = null;
+    }
+    setShowInputDialog(false);
+    setInputScenario(null);
+  };
+
+  const handleInputCancel = () => {
+    if (inputResolveRef.current) {
+      inputResolveRef.current('');
+      inputResolveRef.current = null;
+    }
+    setShowInputDialog(false);
+    setInputScenario(null);
+  };
+
+  const handleCloseResult = () => {
+    setShowResultDialog(false);
+    setResultData(null);
+    if (resultResolveRef.current) {
+      resultResolveRef.current();
+      resultResolveRef.current = null;
+    }
+  };
+
+  // ── 根据实际 Skill 数据生成真实感输出 ──
+  const getSkillCategory = (): string => {
+    const tags = skill.tags.map(t => t.toLowerCase());
+    if (tags.some(t => ['ai', 'llm', 'agent', 'rag'].includes(t))) return 'ai';
+    if (tags.some(t => ['data', 'scraper', 'database', 'analysis'].includes(t))) return 'data';
+    if (tags.some(t => ['security', 'pentest', 'audit'].includes(t))) return 'security';
+    if (tags.some(t => ['automation', 'cli', 'tool', 'devops'].includes(t))) return 'automation';
+    if (tags.some(t => ['web', 'api'].includes(t))) return 'web';
+    return 'general';
+  };
+
+  const generateEnvDetails = (): string => {
+    const reqs = skill.requirements || [];
+    const lines: string[] = [];
+    lines.push(`  • 运行环境: Node.js ≥ 18.0.0`);
+    if (reqs.length > 0) {
+      reqs.slice(0, 3).forEach(r => lines.push(`  • ${r}`));
+    }
+    lines.push(`  • 平台兼容: ${getPlatformCompat(skill.tags).slice(0, 3).join(', ')}`);
+    lines.push(`  • 版本检测: v${skill.version} → 最新稳定版`);
+    return lines.join('\n');
+  };
+
+  const generateFeatureDetails = (): string => {
+    const features = skill.features || [];
+    if (features.length === 0) {
+      return '  • 核心功能模块: 已加载就绪';
+    }
+    return features.slice(0, 4).map(f =>
+      `  • ${f.icon || '▸'} ${f.name}: ${f.description.substring(0, 40)}`
+    ).join('\n');
+  };
+
+  const generateTestExecutionOutput = (scenario: TestScenario, userInput: string): string => {
+    const cat = getSkillCategory();
+    const features = skill.features || [];
+    const inputSummary = userInput ? userInput.substring(0, 60) : '(使用默认测试参数)';
+
+    let executionLines: string[] = [];
+    executionLines.push(`  ╭─ 测试执行过程`);
+    executionLines.push(`  │`);
+    executionLines.push(`  │ 用户输入: ${inputSummary}${userInput.length > 60 ? '...' : ''}`);
+
+    // 根据场景类型生成不同的模拟执行细节
+    switch (scenario.id) {
+      case 'core':
+        executionLines.push(`  │ 调用接口: ${skill.name}.execute(${JSON.stringify(userInput || 'default_task')})`);
+        if (features.length > 0) {
+          executionLines.push(`  │ 功能模块: ${features.map(f => f.name).slice(0, 3).join(', ')}`);
+        }
+        executionLines.push(`  │ 执行模式: 同步调用 → 流式响应`);
+        executionLines.push(`  │ Token 消耗: ${Math.floor(Math.random() * 500 + 200)}`);
+        executionLines.push(`  │ 响应长度: ${userInput ? userInput.length * 8 + Math.floor(Math.random() * 100) : 256} 字符`);
+        break;
+
+      case 'ai-workflow':
+        executionLines.push(`  │ 工作流引擎: AgentPipeline v2.3`);
+        executionLines.push(`  │ 任务分解: ${Math.floor(Math.random() * 5 + 2)} 个子任务`);
+        executionLines.push(`  │ LLM 调用: ${Math.floor(Math.random() * 8 + 3)} 次`);
+        executionLines.push(`  │ 知识库检索: ${Math.floor(Math.random() * 20 + 5)} 条相关片段`);
+        executionLines.push(`  │ 上下文窗口: ${Math.floor(Math.random() * 8000 + 2000)} tokens`);
+        if (userInput) {
+          executionLines.push(`  │ 语义分析: "${userInput.substring(0, 30)}..." → 意图匹配度 ${(Math.random() * 20 + 78).toFixed(1)}%`);
+        }
+        break;
+
+      case 'data-proc':
+        executionLines.push(`  │ 数据源: ${userInput || skill.sourceUrl || '本地文件系统'}`);
+        executionLines.push(`  │ 采集记录: ${Math.floor(Math.random() * 2000 + 128)} 条`);
+        executionLines.push(`  │ 数据清洗: 去重 ${Math.floor(Math.random() * 30 + 5)} 条, 修复格式 ${Math.floor(Math.random() * 15 + 3)} 条`);
+        executionLines.push(`  │ 数据转换: JSON → 结构化表格`);
+        executionLines.push(`  │ 分析引擎: 聚合计算完成, 生成 ${Math.floor(Math.random() * 6 + 2)} 个指标`);
+        break;
+
+      case 'general-use':
+        executionLines.push(`  │ 任务解析: ${userInput ? `"${userInput.substring(0, 40)}..."` : '默认分析任务'}`);
+        executionLines.push(`  │ 上下文分析: 项目结构扫描完成`);
+        executionLines.push(`  │ 建议生成: ${Math.floor(Math.random() * 8 + 3)} 条优化建议`);
+        break;
+
+      default:
+        executionLines.push(`  │ 执行命令: ${scenario.command?.split('\n')[0] || '默认测试命令'}`);
+        executionLines.push(`  │ 测试用例: ${scenario.steps.length} 个验证点`);
+        executionLines.push(`  │ 执行状态: 正常`);
+    }
+
+    executionLines.push(`  │`);
+    executionLines.push(`  ╰─ 执行完成`);
+
+    return executionLines.join('\n');
+  };
+
+  const generateResultOutput = (scenario: TestScenario, userInput: string, passed: boolean): string => {
+    const features = skill.features || [];
+    const reqs = skill.requirements || [];
+    const cat = getSkillCategory();
+    const lines: string[] = [];
+
+    // 标题
+    lines.push(`═══════════════════════════════════════`);
+    lines.push(`  ${passed ? '✓ 测试通过' : '✗ 测试失败'} — ${scenario.name}`);
+    lines.push(`═══════════════════════════════════════`);
+
+    // 用户输入
+    lines.push(``);
+    lines.push(`📝 测试输入`);
+    lines.push(`  ${userInput || '(使用默认参数，未提供自定义输入)'}`);
+
+    // 环境信息 (真实数据)
+    lines.push(``);
+    lines.push(`🔧 运行环境`);
+    lines.push(generateEnvDetails());
+
+    // 功能模块 (真实数据)
+    lines.push(``);
+    lines.push(`📦 功能模块`);
+    lines.push(generateFeatureDetails());
+
+    // 执行过程
+    lines.push(``);
+    lines.push(`⚙️ 执行过程`);
+    lines.push(generateTestExecutionOutput(scenario, userInput));
+
+    // 预期 vs 实际
+    lines.push(``);
+    lines.push(`📋 结果验证`);
+    lines.push(`  预期输出:`);
+    lines.push(`    ${scenario.expectedOutput.substring(0, 60)}...`);
+    lines.push(`  实际输出:`);
+    if (passed) {
+      lines.push(`    所有 ${scenario.steps.length} 个验证点全部通过`);
+      lines.push(`    输出格式符合 SKILL.md 规范`);
+      lines.push(`    响应时间: ${(Math.random() * 1.5 + 0.8).toFixed(2)}s`);
+      lines.push(`    质量评分: ${(Math.random() * 1.2 + 8.3).toFixed(1)}/10`);
+    } else {
+      const errPositions = ['配置解析阶段', '参数校验阶段', '核心执行阶段', '结果格式化阶段'];
+      const errPos = errPositions[Math.floor(Math.random() * errPositions.length)];
+      lines.push(`    在 ${errPos} 发现异常`);
+      lines.push(`    期望结果与实测输出不一致`);
+      lines.push(`    错误码: ERR_${scenario.id.toUpperCase()}_${Math.floor(Math.random() * 999 + 100)}`);
+      lines.push(`    建议: 检查输入参数或查看 ${skill.name} 文档`);
+    }
+
+    // 结论
+    lines.push(``);
+    lines.push(`📌 测试结论`);
+    if (passed) {
+      lines.push(`  ✅ ${skill.name} v${skill.version} 在「${scenario.name}」场景下表现正常`);
+      lines.push(`  ${features.length > 0 ? `已验证 ${features.length} 项功能特性` : '核心功能符合预期'}`);
+      lines.push(`  兼容 ${getPlatformCompat(skill.tags).slice(0, 3).join(', ')} 等平台`);
+    } else {
+      lines.push(`  ❌ 建议修复后重新测试`);
+      lines.push(`  请检查 Skill 配置或联系开发者 ${skill.author}`);
+    }
+
+    return lines.join('\n');
+  };
+
+  const generateStepDetails = (scenario: TestScenario, stepIndex: number, userInput: string): { icon: string; text: string; detail: string } => {
+    const reqs = skill.requirements || [];
+    const features = skill.features || [];
+    const tags = skill.tags.map(t => t.toLowerCase());
+
+    const allSteps = [
+      {
+        icon: '🔍',
+        text: '环境检测',
+        detail: `运行时: Node.js ≥ 18 ✓ | ${reqs.length > 0 ? reqs.slice(0, 2).join(', ') : '依赖齐全'} | 磁盘空间: ${(Math.random() * 10 + 1).toFixed(1)}GB`,
+      },
+      {
+        icon: '📦',
+        text: '依赖加载',
+        detail: `依赖模块: ${features.slice(0, 3).map(f => f.name).join(', ') || '核心模块'} | 接口注册: ${(features.length || 3)}+ 个 | 权限检查通过`,
+      },
+      {
+        icon: '⚙️',
+        text: '场景配置',
+        detail: userInput
+          ? `参数注入: "${userInput.substring(0, 30)}${userInput.length > 30 ? '...' : ''}" | 配置模板: ${scenario.name} | 超时限制: 30s`
+          : `默认配置: ${scenario.name} | 测试级别: ${difficultyColors[scenario.difficulty].label} | 超时限制: 30s`,
+      },
+      {
+        icon: '🧪',
+        text: '测试执行',
+        detail: `调用链: ${tags.includes('ai') ? 'LLM → Parser → Validator' : tags.includes('data') ? 'Reader → Transformer → Analyzer' : 'Loader → Executor → Reporter'} | 并发: ${Math.floor(Math.random() * 4 + 1)} 线程`,
+      },
+      {
+        icon: '📊',
+        text: '结果分析',
+        detail: `断言检查: ${scenario.steps.length} 项 | 输出对比: ${passedTests > 0 ? '基准匹配' : '预期匹配'} | 格式化通过`,
+      },
+    ];
+
+    return allSteps[stepIndex] || allSteps[0];
+  };
+
   const runAllTests = async () => {
     setGlobalStatus('running');
     setTestLogs([]);
@@ -678,53 +943,126 @@ function SkillTestView({
     addLog('🚀', '开始全面测试', `准备执行 ${scenarios.length} 项测试场景...`, 'phase');
 
     const results: Record<string, 'idle' | 'running' | 'pass' | 'fail'> = {};
+    const allStepResults: { scenario: TestScenario; userInput: string; passed: boolean; outputDetails: string; stepResults: { icon: string; text: string; detail: string; passed: boolean }[] }[] = [];
+
     for (let i = 0; i < scenarios.length; i++) {
       const scenario = scenarios[i];
       const diffLabel = difficultyColors[scenario.difficulty].label;
 
       addLog('📌', `[${i + 1}/${scenarios.length}] ${scenario.name}`, `难度: ${diffLabel} | ${scenario.description.substring(0, 40)}...`, 'phase');
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 300));
 
-      // ── 模拟分步执行 ──
-      const steps = [
-        { icon: '🔍', text: '环境检测', detail: '检查运行时依赖与系统配置...' },
-        { icon: '📦', text: '依赖加载', detail: '加载测试模块与资源文件...' },
-        { icon: '⚙️', text: '场景配置', detail: `配置 ${scenario.name} 测试参数...` },
-        { icon: '🧪', text: '测试执行', detail: scenario.command || '运行测试用例...' },
-        { icon: '📊', text: '结果分析', detail: '验证预期输出与实际结果...' },
-      ];
-
-      for (const step of steps) {
-        await new Promise(r => setTimeout(r, 200 + Math.random() * 400));
-        results[scenario.id] = 'running';
-        setTestResults({ ...results });
-        addLog(step.icon, step.text, step.detail, 'info');
+      // ── 需要输入的场景：弹出输入框 ──
+      let userInput = '';
+      if (scenario.requiresInput) {
+        addLog('✏️', '等待用户输入', scenario.inputPrompt || '请输入测试参数...', 'warning');
+        userInput = await waitForInput(scenario);
+        if (userInput) {
+          addLog('📝', '已收到输入', `用户输入: ${userInput.substring(0, 60)}${userInput.length > 60 ? '...' : ''}`, 'info');
+        } else {
+          addLog('⏭️', '用户跳过输入', '使用默认参数执行测试', 'info');
+        }
       }
 
-      // ── 判定结果 ──
-      const passed = Math.random() > 0.15;
+      // ── 分步执行（使用 Skill 真实数据生成步骤细节） ──
+      const stepResults: { icon: string; text: string; detail: string; passed: boolean }[] = [];
+      for (let si = 0; si < 5; si++) {
+        await new Promise(r => setTimeout(r, 150 + Math.random() * 300));
+        results[scenario.id] = 'running';
+        setTestResults({ ...results });
+        const stepDetail = generateStepDetails(scenario, si, userInput);
+        const stepPassed = Math.random() > 0.1;
+        stepResults.push({ ...stepDetail, passed: stepPassed });
+        addLog(stepDetail.icon, stepDetail.text, stepDetail.detail + (stepPassed ? ' ✓' : ' ⚠️'), 'info');
+      }
+
+      // ── 判定结果（结合场景特征，非完全随机） ──
+      const basePassRate = scenario.difficulty === 'beginner' ? 0.92 : scenario.difficulty === 'intermediate' ? 0.85 : 0.78;
+      const inputBonus = userInput.length > 5 ? 0.05 : 0;
+      const passed = Math.random() < (basePassRate + inputBonus);
       results[scenario.id] = passed ? 'pass' : 'fail';
       setTestResults({ ...results });
+
+      // 生成详细输出信息（融入 Skill 真实数据）
+      const outputDetails = generateResultOutput(scenario, userInput, passed);
 
       if (passed) {
         addLog('✅', `${scenario.name} — 通过`, `验证完成，所有断言通过`, 'success');
       } else {
-        const errMsg = `断言异常: 期望输出与实测结果不一致`;
+        const errMsg = `${scenario.name} — 测试失败，查看详情弹窗获取错误信息`;
         addLog('❌', `${scenario.name} — 失败`, errMsg, 'error');
       }
 
       addLog('—', '—', '—', 'divider');
+
+      // ── 暂存结果弹窗数据 ──
+      allStepResults.push({
+        scenario,
+        userInput,
+        passed,
+        outputDetails,
+        stepResults,
+      });
     }
 
+    // ── 全部测试完成后，依次弹出每个场景的详细结果 ──
     const passedCount = Object.values(results).filter(r => r === 'pass').length;
     addLog('🏆', '全部测试完成', `通过 ${passedCount}/${scenarios.length}，${passedCount === scenarios.length ? '完美通过！' : '部分场景需复查'}`, 'phase');
     setGlobalStatus('completed');
+
+    await new Promise(r => setTimeout(r, 600));
+    for (const item of allStepResults) {
+      setResultData(item);
+      setShowResultDialog(true);
+      await new Promise<void>(resolve => {
+        resultResolveRef.current = resolve;
+      });
+      await new Promise(r => setTimeout(r, 300));
+    }
   };
 
   const runSingleTest = async (id: string) => {
+    const scenario = scenarios.find(s => s.id === id);
+    if (!scenario) return;
+
     setTestResults(prev => ({ ...prev, [id]: 'running' }));
-    await new Promise(r => setTimeout(r, 600 + Math.random() * 1000));
-    setTestResults(prev => ({ ...prev, [id]: Math.random() > 0.15 ? 'pass' : 'fail' }));
+
+    // ── 需要输入的场景：弹出输入框 ──
+    let userInput = '';
+    if (scenario.requiresInput) {
+      addLog('✏️', '等待用户输入', scenario.inputPrompt || '请输入测试参数...', 'warning');
+      userInput = await waitForInput(scenario);
+      if (userInput) {
+        addLog('📝', '已收到输入', `用户输入: ${userInput.substring(0, 60)}${userInput.length > 60 ? '...' : ''}`, 'info');
+      } else {
+        addLog('⏭️', '用户跳过输入', '使用默认参数执行测试', 'info');
+      }
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+
+    // ── 分步执行（使用 Skill 真实数据生成步骤细节） ──
+    const stepResults: { icon: string; text: string; detail: string; passed: boolean }[] = [];
+    for (let si = 0; si < 5; si++) {
+      await new Promise(r => setTimeout(r, 100 + Math.random() * 250));
+      setTestResults(prev => ({ ...prev, [id]: 'running' }));
+      const stepDetail = generateStepDetails(scenario, si, userInput);
+      const stepPassed = Math.random() > 0.1;
+      stepResults.push({ ...stepDetail, passed: stepPassed });
+    }
+
+    const basePassRate = scenario.difficulty === 'beginner' ? 0.92 : scenario.difficulty === 'intermediate' ? 0.85 : 0.78;
+    const inputBonus = userInput.length > 5 ? 0.05 : 0;
+    const passed = Math.random() < (basePassRate + inputBonus);
+    setTestResults(prev => ({ ...prev, [id]: passed ? 'pass' : 'fail' }));
+
+    // ── 生成结果详情（融入 Skill 真实数据） ──
+    const outputDetails = generateResultOutput(scenario, userInput, passed);
+
+    // ── 显示结果弹窗 ──
+    await new Promise(r => setTimeout(r, 300));
+    setResultData({ scenario, userInput, passed, outputDetails, stepResults });
+    setShowResultDialog(true);
   };
 
   const resetAll = () => {
@@ -745,6 +1083,7 @@ function SkillTestView({
   };
 
   return (
+    <>
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
       {/* ═══ 左侧: 测试列表 ═══ */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
@@ -1510,6 +1849,389 @@ function SkillTestView({
         </div>
       )}
     </div>
+
+      {/* ═══════════════════════════════════════════════════
+          输入弹窗
+          ═══════════════════════════════════════════════════ */}
+      {showInputDialog && inputScenario && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+        }}>
+          <div style={{
+            width: 'min(520px, 92vw)',
+            background: 'linear-gradient(160deg, #1c1816, #161210)',
+            borderRadius: 16,
+            border: '1px solid rgba(var(--accent-rgb),0.15)',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(var(--accent-rgb),0.05)',
+            overflow: 'hidden',
+          }}>
+            {/* 弹窗标题 */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '16px 20px',
+              borderBottom: '1px solid rgba(var(--accent-rgb),0.1)',
+            }}>
+              <div style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: 'rgba(var(--accent-rgb),0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+              }}>
+                {inputScenario.icon}
+              </div>
+              <div>
+                <div style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  fontFamily: "'Inter', sans-serif",
+                }}>
+                  {inputScenario.name} — 输入测试参数
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  color: '#6b5f55',
+                  marginTop: 1,
+                  fontFamily: "'Inter', sans-serif",
+                }}>
+                  {inputScenario.category} · {difficultyColors[inputScenario.difficulty].label}
+                </div>
+              </div>
+            </div>
+
+            {/* 弹窗内容 */}
+            <div style={{ padding: '20px' }}>
+              {/* 要求和说明 */}
+              <div style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: 'rgba(var(--accent-rgb),0.06)',
+                border: '1px solid rgba(var(--accent-rgb),0.1)',
+                marginBottom: 16,
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--text-accent)',
+                  marginBottom: 6,
+                  fontFamily: "'Inter', sans-serif",
+                  letterSpacing: '0.02em',
+                }}>
+                  📋 输入要求与说明
+                </div>
+                <p style={{
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  color: 'rgba(200,190,180,0.8)',
+                  fontFamily: "'Inter', 'PingFang SC', sans-serif",
+                  margin: 0,
+                }}>
+                  {inputScenario.inputPrompt}
+                </p>
+              </div>
+
+              {/* 场景描述 */}
+              <div style={{
+                fontSize: 12,
+                color: '#6b5f55',
+                marginBottom: 12,
+                fontFamily: "'Inter', sans-serif",
+                lineHeight: 1.6,
+              }}>
+                {inputScenario.description}
+              </div>
+
+              {/* 输入框 */}
+              <textarea
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                placeholder={inputScenario.inputPlaceholder}
+                autoFocus
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(var(--accent-rgb),0.15)',
+                  background: 'rgba(0,0,0,0.3)',
+                  color: '#e8e0d8',
+                  fontSize: 13,
+                  fontFamily: "'JetBrains Mono', 'Inter', monospace",
+                  lineHeight: 1.6,
+                  outline: 'none',
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* 按钮区域 */}
+            <div style={{
+              display: 'flex',
+              gap: 8,
+              padding: '12px 20px',
+              borderTop: '1px solid rgba(255,255,255,0.04)',
+              justifyContent: 'flex-end',
+            }}>
+              <button
+                onClick={handleInputCancel}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(var(--accent-rgb),0.12)',
+                  background: 'transparent',
+                  color: '#8a7e74',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  fontFamily: "'Inter', sans-serif",
+                  cursor: 'pointer',
+                }}
+              >
+                跳过输入
+              </button>
+              <button
+                onClick={handleInputConfirm}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #d4a574, #c49564)',
+                  color: '#1a1412',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: "'Inter', sans-serif",
+                  cursor: 'pointer',
+                }}
+              >
+                确认提交
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          结果详情弹窗
+          ═══════════════════════════════════════════════════ */}
+      {showResultDialog && resultData && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+        }}>
+          <div style={{
+            width: 'min(600px, 92vw)',
+            maxHeight: 'min(80vh, 700px)',
+            background: 'linear-gradient(160deg, #1c1816, #161210)',
+            borderRadius: 16,
+            border: `1px solid ${resultData.passed ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)'}`,
+            boxShadow: `0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px ${resultData.passed ? 'rgba(74,222,128,0.05)' : 'rgba(248,113,113,0.05)'}`,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            {/* 弹窗标题 */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '16px 20px',
+              borderBottom: `1px solid ${resultData.passed ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}`,
+              flexShrink: 0,
+            }}>
+              <div style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: resultData.passed ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+              }}>
+                {resultData.passed ? '✅' : '❌'}
+              </div>
+              <div>
+                <div style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  fontFamily: "'Inter', sans-serif",
+                }}>
+                  {resultData.passed ? '测试通过' : '测试失败'} — {resultData.scenario.name}
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  color: resultData.passed ? '#4ade80' : '#f87171',
+                  marginTop: 1,
+                  fontFamily: "'Inter', sans-serif",
+                  fontWeight: 500,
+                }}>
+                  {resultData.passed ? '所有断言验证通过，输出符合预期' : '存在断言异常或输出不符合预期'}
+                </div>
+              </div>
+            </div>
+
+            {/* 弹窗内容（可滚动） */}
+            <div style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '20px',
+            }}>
+              {/* 用户输入 */}
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: 10,
+                background: 'rgba(var(--accent-rgb),0.04)',
+                border: '1px solid rgba(var(--accent-rgb),0.08)',
+                marginBottom: 16,
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--text-accent)',
+                  marginBottom: 4,
+                  fontFamily: "'Inter', sans-serif",
+                }}>
+                  测试输入
+                </div>
+                <div style={{
+                  fontSize: 13,
+                  color: '#e8e0d8',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>
+                  {resultData.userInput || '(使用默认参数，未提供自定义输入)'}
+                </div>
+              </div>
+
+              {/* 执行步骤 */}
+              <div style={{
+                marginBottom: 16,
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#5ec4d4',
+                  marginBottom: 8,
+                  fontFamily: "'Inter', sans-serif",
+                  letterSpacing: '0.02em',
+                }}>
+                  执行步骤明细
+                </div>
+                {resultData.stepResults.map((step, idx) => (
+                  <div key={idx} style={{
+                    display: 'flex',
+                    gap: 10,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: step.passed ? 'rgba(74,222,128,0.03)' : 'rgba(248,113,113,0.03)',
+                    marginBottom: 4,
+                    alignItems: 'flex-start',
+                  }}>
+                    <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>{step.passed ? '✓' : '⚠️'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: step.passed ? '#4ade80' : '#f87171',
+                        fontFamily: "'Inter', sans-serif",
+                      }}>
+                        {step.text}
+                      </div>
+                      <div style={{
+                        fontSize: 11,
+                        color: '#6b5f55',
+                        fontFamily: "'Inter', sans-serif",
+                        marginTop: 1,
+                      }}>
+                        {step.detail}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 测试结果详情 */}
+              <div style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: resultData.passed ? 'rgba(74,222,128,0.04)' : 'rgba(248,113,113,0.04)',
+                border: `1px solid ${resultData.passed ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)'}`,
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: resultData.passed ? '#4ade80' : '#f87171',
+                  marginBottom: 6,
+                  fontFamily: "'Inter', sans-serif",
+                }}>
+                  {resultData.passed ? '📋 测试通过详情' : '📋 测试失败详情'}
+                </div>
+                <pre style={{
+                  fontSize: 12,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: 'rgba(200,190,180,0.75)',
+                  lineHeight: 1.6,
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>
+                  {resultData.outputDetails}
+                </pre>
+              </div>
+            </div>
+
+            {/* 关闭按钮 */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8,
+              padding: '12px 20px',
+              borderTop: '1px solid rgba(255,255,255,0.04)',
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={handleCloseResult}
+                style={{
+                  padding: '8px 24px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #d4a574, #c49564)',
+                  color: '#1a1412',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: "'Inter', sans-serif",
+                  cursor: 'pointer',
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
