@@ -169,6 +169,91 @@ function generateChineseContent(skill: SkillMeta, readmeText?: string) {
     ],
   });
 
+  // ── Section 1.5: Quick Start Guide (new) ──
+  {
+    // Generate category-specific example prompts
+    const tags = skill.tags.map(t => t.toLowerCase());
+    const examplePrompts: { command: string; description: string }[] = [];
+
+    if (tags.some(t => ['ai', 'llm', 'agent', 'rag'].includes(t))) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --task "分析这份文档，提取关键信息并总结成报告"`,
+        description: '让 AI 自动分析文档内容，提取要点并生成结构化报告',
+      });
+      examplePrompts.push({
+        command: `/use ${skill.name} --mode rag --query "如何优化数据库查询性能？"`,
+        description: '结合知识库进行 RAG 检索增强生成，获取精准答案',
+      });
+    }
+    if (tags.some(t => ['data', 'scraper', 'database', 'analysis'].includes(t))) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --source "https://example.com/data" --format json`,
+        description: '从指定数据源采集数据，自动清洗并输出为 JSON 格式',
+      });
+      examplePrompts.push({
+        command: `/use ${skill.name} --analyze --metrics "count, avg, sum" --output ./report.json`,
+        description: '对已有数据执行多维分析，计算关键指标并导出结果',
+      });
+    }
+    if (tags.some(t => ['automation', 'cli', 'tool', 'devops'].includes(t))) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --auto --interval daily --task "清理临时文件并生成日志"`,
+        description: '配置自动化任务，按每日频率定时执行清理和日志生成',
+      });
+    }
+    if (tags.some(t => ['security', 'pentest', 'audit'].includes(t))) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --quick-scan ./project/ --level critical`,
+        description: '对项目目录执行快速安全扫描，检测高危漏洞',
+      });
+      examplePrompts.push({
+        command: `/use ${skill.name} --full-audit --format pdf`,
+        description: '执行全面安全审计并生成 PDF 格式的审计报告',
+      });
+    }
+    if (tags.some(t => ['web', 'api'].includes(t))) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --endpoint "https://api.example.com" --method GET`,
+        description: '调用外部 API 接口，获取并处理返回数据',
+      });
+    }
+
+    // Fallback general examples
+    if (examplePrompts.length < 2) {
+      examplePrompts.push({
+        command: `/use ${skill.name} --task "帮我分析当前项目结构并提供优化建议"`,
+        description: '让 Skill 自动分析项目结构，给出架构优化建议',
+      });
+      examplePrompts.push({
+        command: `/use ${skill.name} --help`,
+        description: '查看该 Skill 的完整帮助文档和可用参数列表',
+      });
+    }
+
+    const platNames = getPlatformCompat(skill.tags);
+    const quickStartLines: ContentLine[] = [
+      { type: 'paragraph', text: `${skill.name} 的标准调用方式如下，您可以在对话中直接使用：` },
+      { type: 'spacer' },
+      { type: 'code', text: `/use ${skill.name} --task "请描述您的需求"` },
+      { type: 'spacer' },
+      { type: 'paragraph', text: '以下是一些常用的示例，点击即可参考使用：' },
+      { type: 'spacer' },
+    ];
+
+    for (const ex of examplePrompts.slice(0, 4)) {
+      quickStartLines.push({ type: 'example', command: ex.command, description: ex.description });
+    }
+
+    quickStartLines.push({ type: 'spacer' });
+    quickStartLines.push({ type: 'paragraph', text: `支持平台：${platNames.join('、')}。在不同平台中，调用方式可能略有差异，请参考对应平台的 SKILL.md 加载规范。` });
+
+    sections.splice(1, 0, {
+      title: '快速上手指南',
+      icon: <Zap style={{ width: 16, height: 16 }} />,
+      content: quickStartLines,
+    });
+  }
+
   // ── Section 2: Tag Analysis (new) ──
   if (skill.tags.length > 0) {
     const tagLines: ContentLine[] = [
@@ -934,6 +1019,54 @@ function SkillTestView({
     ];
 
     return allSteps[stepIndex] || allSteps[0];
+  };
+
+  // ── 根据场景生成输入建议 ──
+  const getInputSuggestions = (s: SkillMeta, scenario: TestScenario): string[] => {
+    const tags = s.tags.map(t => t.toLowerCase());
+    switch (scenario.id) {
+      case 'core':
+        if (tags.some(t => ['ai', 'llm', 'agent'].includes(t))) {
+          return ['分析项目代码架构并给出优化建议', '根据需求生成一个 REST API 接口', '对这段代码进行安全审查', '帮我解释这个算法的原理和复杂度'];
+        }
+        if (tags.some(t => ['data', 'database'].includes(t))) {
+          return ['分析这份 CSV 数据的统计特征', '将 JSON 数据转换为关系表结构', '查询数据库中的用户活跃度数据', '清洗并标准化这些原始数据'];
+        }
+        if (tags.some(t => ['automation', 'devops'].includes(t))) {
+          return ['配置 CI/CD 流水线自动部署', '编写自动化测试脚本', '监控服务器日志并设置告警', '批量处理目录中的所有文件'];
+        }
+        if (tags.some(t => ['security'].includes(t))) {
+          return ['扫描项目依赖中的已知漏洞', '审计代码中的安全配置问题', '检查 API 端点的认证授权', '生成安全合规报告'];
+        }
+        return ['分析当前项目结构并提供优化建议', '帮我重构这段代码以提高可维护性', '生成详细的技术文档和 API 说明', '检查代码中的潜在 Bug 和性能问题'];
+
+      case 'ai-workflow':
+        return [
+          '从知识库中检索相关文档并总结关键要点',
+          '分析用户反馈数据并生成改进建议报告',
+          '将这份英文技术文档翻译成中文并提炼摘要',
+          '基于历史数据预测下季度的业务趋势',
+        ];
+
+      case 'data-proc':
+        return [
+          'https://api.example.com/v1/users （采集用户数据）',
+          './data/sales-2026.csv （分析销售数据）',
+          'SELECT * FROM orders WHERE date > "2026-01-01" （数据库查询）',
+          'mongodb://localhost:27017/products （从 MongoDB 采集）',
+        ];
+
+      case 'general-use':
+        return [
+          '帮我分析这个项目的代码质量并给出改进建议',
+          '生成一份完整的技术方案设计文档',
+          '检查项目中存在的安全漏洞和性能瓶颈',
+          '为这个项目编写单元测试和集成测试',
+        ];
+
+      default:
+        return ['使用默认参数执行测试', '输入自定义测试场景描述'];
+    }
   };
 
   const runAllTests = async () => {
@@ -1954,6 +2087,53 @@ function SkillTestView({
                 {inputScenario.description}
               </div>
 
+              {/* 快速填充建议 */}
+              {inputScenario && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: '#6b5f55',
+                    marginBottom: 6,
+                    fontFamily: "'Inter', sans-serif",
+                    letterSpacing: '0.02em',
+                  }}>
+                    💡 快速示例（点击自动填入）
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {getInputSuggestions(skill, inputScenario).map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setInputValue(s)}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: 6,
+                          border: '1px solid rgba(var(--accent-rgb),0.12)',
+                          background: 'rgba(var(--accent-rgb),0.04)',
+                          color: '#c4b8ac',
+                          fontSize: 11,
+                          fontFamily: "'Inter', 'PingFang SC', sans-serif",
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          lineHeight: 1.4,
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = 'rgba(var(--accent-rgb),0.1)';
+                          e.currentTarget.style.color = '#e8e0d8';
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = 'rgba(var(--accent-rgb),0.04)';
+                          e.currentTarget.style.color = '#c4b8ac';
+                        }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 输入框 */}
               <textarea
                 value={inputValue}
@@ -2394,7 +2574,8 @@ type ContentLine =
   | { type: 'stat'; label: string; value: string; icon: string }
   | { type: 'detailRow'; label: string; value: string }
   | { type: 'code'; text: string }
-  | { type: 'link'; label: string; url: string };
+  | { type: 'link'; label: string; url: string }
+  | { type: 'example'; command: string; description: string };
 
 /* ═══════════════════════════════════════════════════
    Content Renderer Component
@@ -2609,6 +2790,40 @@ function renderContentLine(line: ContentLine, idx: number, accentColor: string) 
           {line.label}
           <ArrowUpRight style={{ width: 12, height: 12, marginLeft: 'auto', opacity: 0.5 }} />
         </a>
+      );
+
+    case 'example':
+      return (
+        <div key={idx} style={{
+          padding: '12px 14px',
+          borderRadius: 10,
+          background: 'rgba(var(--accent-rgb),0.04)',
+          border: '1px solid rgba(var(--accent-rgb),0.1)',
+          marginBottom: 8,
+          transition: 'all 0.2s ease',
+        }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(var(--accent-rgb),0.07)'; e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb),0.2)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(var(--accent-rgb),0.04)'; e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb),0.1)'; }}
+        >
+          <div style={{
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: 'rgba(200,210,220,0.85)',
+            fontFamily: "'JetBrains Mono', 'Inter', monospace",
+            marginBottom: 6,
+            wordBreak: 'break-all',
+          }}>
+            {line.command}
+          </div>
+          <div style={{
+            fontSize: 11.5,
+            color: '#6b5f55',
+            fontFamily: "'Inter', 'PingFang SC', sans-serif",
+            lineHeight: 1.5,
+          }}>
+            {line.description}
+          </div>
+        </div>
       );
 
     default:
