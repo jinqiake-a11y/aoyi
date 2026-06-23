@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import type { SkillMeta } from '../types';
 import { fetchGitHubRepo } from '../utils/github';
 import {
-  Star, Download, Calendar, User, GitFork,
+  Star, Calendar, User, GitFork,
   ExternalLink, X, Tag, Zap, Package,
-  Clock, BookOpen, Code, Layers, ArrowUpRight,
+  Clock, BookOpen, Code, ArrowUpRight,
   Globe, TrendingUp, Activity, FileText, Beaker,
   CheckCircle2, XCircle, Play, RotateCcw, ChevronRight,
 } from 'lucide-react';
@@ -511,7 +511,7 @@ interface TestScenario {
   inputPlaceholder?: string;
 }
 
-function generateTestScenarios(skill: SkillMeta, readmeText?: string): TestScenario[] {
+function generateTestScenarios(skill: SkillMeta): TestScenario[] {
   const tags = skill.tags.map(t => t.toLowerCase());
   const scenarios: TestScenario[] = [];
   const category = Object.entries(CATEGORY_MAP).find(([key]) =>
@@ -732,16 +732,12 @@ function generateUseCaseScenarios(skill: SkillMeta, category: string, tags: stri
    ═══════════════════════════════════════════════════ */
 function SkillTestView({
   skill,
-  readmeText,
   onBack,
-  accentColor,
 }: {
   skill: SkillMeta;
-  readmeText?: string;
   onBack: () => void;
-  accentColor: string;
 }) {
-  const [scenarios] = useState(() => generateTestScenarios(skill, readmeText));
+  const [scenarios] = useState(() => generateTestScenarios(skill));
   const [testResults, setTestResults] = useState<Record<string, 'idle' | 'running' | 'pass' | 'fail'>>({});
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -825,17 +821,6 @@ function SkillTestView({
     }
   };
 
-  // ── 根据实际 Skill 数据生成真实感输出 ──
-  const getSkillCategory = (): string => {
-    const tags = skill.tags.map(t => t.toLowerCase());
-    if (tags.some(t => ['ai', 'llm', 'agent', 'rag'].includes(t))) return 'ai';
-    if (tags.some(t => ['data', 'scraper', 'database', 'analysis'].includes(t))) return 'data';
-    if (tags.some(t => ['security', 'pentest', 'audit'].includes(t))) return 'security';
-    if (tags.some(t => ['automation', 'cli', 'tool', 'devops'].includes(t))) return 'automation';
-    if (tags.some(t => ['web', 'api'].includes(t))) return 'web';
-    return 'general';
-  };
-
   const generateEnvDetails = (): string => {
     const reqs = skill.requirements || [];
     const lines: string[] = [];
@@ -859,7 +844,6 @@ function SkillTestView({
   };
 
   const generateTestExecutionOutput = (scenario: TestScenario, userInput: string): string => {
-    const cat = getSkillCategory();
     const features = skill.features || [];
     const inputSummary = userInput ? userInput.substring(0, 60) : '(使用默认测试参数)';
 
@@ -919,8 +903,6 @@ function SkillTestView({
 
   const generateResultOutput = (scenario: TestScenario, userInput: string, passed: boolean): string => {
     const features = skill.features || [];
-    const reqs = skill.requirements || [];
-    const cat = getSkillCategory();
     const lines: string[] = [];
 
     // 标题
@@ -1787,7 +1769,6 @@ function SkillTestView({
           gap: 4,
         }}>
           {[1, 2, 3, 4, 5].map(star => {
-            const isRated = Object.values(ratings).some(r => r >= star);
             const avgRating = Object.values(ratings).length > 0
               ? Object.values(ratings).reduce((a, b) => a + b, 0) / Object.values(ratings).length
               : 0;
@@ -2492,10 +2473,6 @@ function generateUseCases(skill: SkillMeta, category: string): { title: string; 
    ═══════════════════════════════════════════════════ */
 function parseReadmeIntoSections(readme: string): { title: string; content: string }[] {
   const sections: { title: string; content: string }[] = [];
-  const headingRegex = /^##\s+(.+)$/gm;
-  let lastIndex = 0;
-  let lastTitle = '项目概述';
-  let match;
 
   // Remove badges, images, HTML comments
   let clean = readme
@@ -3228,9 +3205,7 @@ export default function SkillDetailDrawer({ skill, open, onClose }: SkillDetailD
             /* ════ Test View ════ */
             <SkillTestView
               skill={current}
-              readmeText={readmeContent || undefined}
               onBack={() => setTestMode(false)}
-              accentColor={accentColor}
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
